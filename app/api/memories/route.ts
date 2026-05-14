@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import Anthropic from '@anthropic-ai/sdk'
-import { authOptions } from '@/app/api/auth/[...nextauth]/route'
+import { authOptions } from '@/lib/auth'
 import { db, getUserByEmail } from '@/lib/supabase'
 import { buildExtractionPrompt } from '@/lib/prompts'
 import { MODELS, MAX_TOKENS } from '@/lib/models'
@@ -37,7 +37,6 @@ export async function DELETE(req: NextRequest) {
   return NextResponse.json({ ok: true })
 }
 
-// ── HAIKU: extract patterns from raw pasted data ─────────────────────────
 export async function PUT(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -49,9 +48,9 @@ export async function PUT(req: NextRequest) {
 
   try {
     const res = await claude.messages.create({
-      model:      MODELS.EXTRACTION,
+      model: MODELS.EXTRACTION,
       max_tokens: MAX_TOKENS.EXTRACTION,
-      system:     buildExtractionPrompt(
+      system: buildExtractionPrompt(
         'Analyze raw message/chat/document data and extract personality insights. ' +
         'Return JSON: {"title":"short title","summary":"2-3 sentence summary","patterns":"communication style","topics":["topic1"],"insights":["insight1"],"tone":"emotional tone"}'
       ),
@@ -60,7 +59,7 @@ export async function PUT(req: NextRequest) {
 
     const rawText = res.content[0].type === 'text' ? res.content[0].text : '{}'
     let p: any = {}
-    try { p = JSON.parse(rawText.replace(/```json|```/g,'').trim()) } catch {}
+    try { p = JSON.parse(rawText.replace(/```json|```/g, '').trim()) } catch {}
 
     const content = [p.summary, p.patterns && `Patterns: ${p.patterns}`,
       p.topics?.length && `Topics: ${p.topics.join(', ')}`,
@@ -68,7 +67,7 @@ export async function PUT(req: NextRequest) {
 
     const { data } = await db.from('memories').insert({
       user_id: user.id,
-      title:   p.title || `${source || 'Import'} — ${new Date().toLocaleDateString('id-ID')}`,
+      title: p.title || `${source || 'Import'} — ${new Date().toLocaleDateString('id-ID')}`,
       content: content || raw.slice(0, 1500),
       category: 'Extracted Pattern', source: source || 'paste', importance: 7,
     }).select()

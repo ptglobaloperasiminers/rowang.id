@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import Anthropic from '@anthropic-ai/sdk'
-import { authOptions } from '@/app/api/auth/[...nextauth]/route'
+import { authOptions } from '@/lib/auth'
 import { db, getUserByEmail } from '@/lib/supabase'
 import { buildFullPersonaPrompt } from '@/lib/prompts'
 import { MODELS, MAX_TOKENS } from '@/lib/models'
@@ -30,7 +30,6 @@ export async function POST(req: NextRequest) {
   const voicePatterns = (voiceRes.data || [])
     .map(r => r.transcript?.slice(0, 120)).filter(Boolean) as string[]
 
-  // ── OPUS: premium clone output ─────────────────────────────────────────
   const system = buildFullPersonaPrompt(
     ownerRes.data?.name || 'this person',
     personaMap,
@@ -39,10 +38,10 @@ export async function POST(req: NextRequest) {
   )
 
   const stream = await claude.messages.stream({
-    model:      MODELS.CLONE,
+    model: MODELS.CLONE,
     max_tokens: MAX_TOKENS.CLONE,
     system,
-    messages:   messages.slice(-20),
+    messages: messages.slice(-20),
   })
 
   let full = ''
@@ -57,8 +56,8 @@ export async function POST(req: NextRequest) {
       }
       db.from('chat_sessions').insert({
         owner_user_id: ownerId,
-        visitor_name:  user.name || user.email,
-        messages:      [...messages, { role: 'assistant', content: full }],
+        visitor_name: user.name || user.email,
+        messages: [...messages, { role: 'assistant', content: full }],
       }).then(() => {})
       ctrl.close()
     },

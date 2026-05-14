@@ -1,7 +1,7 @@
-// This file is app/page.tsx
 import { redirect } from 'next/navigation'
 import { getServerSession } from 'next-auth'
-import { authOptions } from './api/auth/[...nextauth]/route'
+import { authOptions } from '@/lib/auth'
+
 export default async function Root() {
   const s = await getServerSession(authOptions)
   redirect(s ? '/dashboard' : '/login')

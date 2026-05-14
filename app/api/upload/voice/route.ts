@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
-import { authOptions } from '@/app/api/auth/[...nextauth]/route'
+import { authOptions } from '@/lib/auth'
 import { db, getUserByEmail } from '@/lib/supabase'
 import { buildExtractionPrompt } from '@/lib/prompts'
 import { MODELS, MAX_TOKENS } from '@/lib/models'
@@ -16,12 +16,11 @@ export async function POST(req: NextRequest) {
   const user = await getUserByEmail(session.user.email)
   if (!user) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const form     = await req.formData()
-  const audio    = form.get('audio') as File
+  const form = await req.formData()
+  const audio = form.get('audio') as File
   const duration = parseInt(form.get('duration') as string || '0')
   if (!audio) return NextResponse.json({ error: 'No audio' }, { status: 400 })
 
-  // Whisper — handles Bahasa Indonesia + English mix
   const transcript = await openai.audio.transcriptions.create({
     file: audio, model: 'whisper-1', language: 'id', response_format: 'text',
   }) as unknown as string
@@ -30,7 +29,6 @@ export async function POST(req: NextRequest) {
     user_id: user.id, duration_seconds: duration, transcript, processed: false,
   }).select().single()
 
-  // ── HAIKU: background voice pattern extraction ─────────────────────────
   if (transcript?.length > 80) extractVoice(user.id, transcript, rec?.id, duration)
 
   return NextResponse.json({ id: rec?.id, transcript, duration })
@@ -39,9 +37,9 @@ export async function POST(req: NextRequest) {
 async function extractVoice(userId: string, transcript: string, recId: string | undefined, duration: number) {
   try {
     const res = await claude.messages.create({
-      model:      MODELS.EXTRACTION,
+      model: MODELS.EXTRACTION,
       max_tokens: MAX_TOKENS.EXTRACTION,
-      system:     buildExtractionPrompt(
+      system: buildExtractionPrompt(
         'Extract personality insights from this spoken transcript. ' +
         'Return JSON: {"title":"short title","summary":"2-3 sentence summary","communication_patterns":"how they speak","topics":["topic1"],"key_quotes":["phrase1"],"emotional_tone":"description"}'
       ),
@@ -53,13 +51,12 @@ async function extractVoice(userId: string, transcript: string, recId: string | 
     try { p = JSON.parse(raw.replace(/```json|```/g, '').trim()) } catch {}
 
     await db.from('memories').insert({
-      user_id:   userId,
-      title:     p.title || `Voice memo — ${new Date().toLocaleDateString('id-ID')}`,
-      content:   [p.summary, p.communication_patterns && `Speaking style: ${p.communication_patterns}`,
-                  p.key_quotes?.length && `Key phrases: ${p.key_quotes.join(' · ')}`,
-                  p.topics?.length && `Topics: ${p.topics.join(', ')}`].filter(Boolean).join('\n\n'),
-      category:  'Voice Recording',
-      source:    'voice',
+      user_id: userId,
+      title: p.title || `Voice memo — ${new Date().toLocaleDateString('id-ID')}`,
+      content: [p.summary, p.communication_patterns && `Speaking style: ${p.communication_patterns}`,
+        p.key_quotes?.length && `Key phrases: ${p.key_quotes.join(' · ')}`,
+        p.topics?.length && `Topics: ${p.topics.join(', ')}`].filter(Boolean).join('\n\n'),
+      category: 'Voice Recording', source: 'voice',
       importance: Math.min(10, Math.round(4 + duration / 120)),
     })
 

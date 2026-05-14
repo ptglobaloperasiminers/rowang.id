@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import Anthropic from '@anthropic-ai/sdk'
-import { authOptions } from '@/app/api/auth/[...nextauth]/route'
+import { authOptions } from '@/lib/auth'
 import { db, getUserByEmail } from '@/lib/supabase'
 import { buildInterviewPrompt, buildExtractionPrompt } from '@/lib/prompts'
 import { MODELS, MAX_TOKENS } from '@/lib/models'
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-// Send a message — SONNET conducts, HAIKU extracts in background
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -21,12 +20,11 @@ export async function POST(req: NextRequest) {
   const existing: Record<string, string> = {}
   rows?.forEach(r => { if (r.answer) existing[r.field_id] = r.answer })
 
-  // ── SONNET: interview conductor ────────────────────────────────────────
   const stream = await claude.messages.stream({
-    model:      MODELS.INTERVIEW,
+    model: MODELS.INTERVIEW,
     max_tokens: MAX_TOKENS.INTERVIEW,
-    system:     buildInterviewPrompt(category, existing, messages?.length || 0),
-    messages:   messages?.slice(-16) || [],
+    system: buildInterviewPrompt(category, existing, messages?.length || 0),
+    messages: messages?.slice(-16) || [],
   })
 
   let full = ''
@@ -43,7 +41,6 @@ export async function POST(req: NextRequest) {
         const updated = [...(messages || []), { role: 'assistant', content: full }]
         db.from('interview_sessions').update({ messages: updated }).eq('id', sessionId).then(() => {})
       }
-      // ── HAIKU: background extraction ──────────────────────────────────
       if ((messages?.length || 0) >= 6) extractInsights(user.id, category, messages, full)
       ctrl.close()
     },
@@ -52,7 +49,6 @@ export async function POST(req: NextRequest) {
   return new NextResponse(readable, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
 }
 
-// Start session — SONNET generates opening question
 export async function PUT(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -70,12 +66,11 @@ export async function PUT(req: NextRequest) {
   const existing: Record<string, string> = {}
   rows?.forEach(r => { if (r.answer) existing[r.field_id] = r.answer })
 
-  // ── SONNET: opening question ───────────────────────────────────────────
   const res = await claude.messages.create({
-    model:      MODELS.INTERVIEW,
+    model: MODELS.INTERVIEW,
     max_tokens: MAX_TOKENS.INTERVIEW,
-    system:     buildInterviewPrompt(category, existing, 0),
-    messages:   [{ role: 'user', content: `Begin the ${category} interview. Ask your first question now.` }],
+    system: buildInterviewPrompt(category, existing, 0),
+    messages: [{ role: 'user', content: `Begin the ${category} interview. Ask your first question now.` }],
   })
 
   const opening = res.content[0].type === 'text' ? res.content[0].text
@@ -88,7 +83,6 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json({ sessionId: sess?.id, opening })
 }
 
-// ── HAIKU: extract structured insights from conversation ─────────────────
 async function extractInsights(
   userId: string, category: string,
   messages: { role: string; content: string }[], lastReply: string
@@ -98,9 +92,9 @@ async function extractInsights(
       .filter(m => m.role === 'user').map(m => m.content).join('\n---\n').slice(0, 2500)
 
     const res = await claude.messages.create({
-      model:      MODELS.EXTRACTION,
+      model: MODELS.EXTRACTION,
       max_tokens: MAX_TOKENS.EXTRACTION,
-      system:     buildExtractionPrompt(
+      system: buildExtractionPrompt(
         `Extract key personality insights from this interview transcript about "${category}". ` +
         `Return a JSON object — keys are snake_case field names, values are 1-3 sentence insights.`
       ),
@@ -114,9 +108,9 @@ async function extractInsights(
     for (const [key, val] of Object.entries(insights)) {
       if (typeof val !== 'string' || !val.trim()) continue
       await db.from('persona').upsert({
-        user_id:  userId,
-        field_id: `ai_${category.replace(/\s+/g,'_').toLowerCase()}_${key}`,
-        category, question: key.replace(/_/g,' '), answer: val,
+        user_id: userId,
+        field_id: `ai_${category.replace(/\s+/g, '_').toLowerCase()}_${key}`,
+        category, question: key.replace(/_/g, ' '), answer: val,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id,field_id' })
     }
