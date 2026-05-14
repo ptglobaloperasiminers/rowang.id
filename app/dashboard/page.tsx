@@ -44,13 +44,11 @@ export default function Dashboard() {
   const [doneCats, setDone]   = useState<string[]>([])
   const iRef = useRef<HTMLDivElement>(null)
 
-  // Voice
+  // Voice — uses browser Web Speech API (free, no OpenAI)
   const [vState, setVState]   = useState<'idle'|'rec'|'proc'|'done'>('idle')
   const [vSec, setVSec]       = useState(0)
   const [vTotal, setVTotal]   = useState(0)
   const [vText, setVText]     = useState('')
-  const mRec   = useRef<MediaRecorder|null>(null)
-  const mChunk = useRef<Blob[]>([])
   const mTimer = useRef<NodeJS.Timeout>()
   const mStart = useRef(0)
 
@@ -115,35 +113,57 @@ export default function Dashboard() {
     setIStream(false); fetchConf()
   }
 
-  // Voice
-  const startRec = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio:true })
-      mRec.current = new MediaRecorder(stream, { mimeType:'audio/webm' })
-      mChunk.current = []
-      mRec.current.ondataavailable = e => { if (e.data.size>0) mChunk.current.push(e.data) }
-      mRec.current.onstop = uploadRec
-      mRec.current.start(250); mStart.current = Date.now()
-      setVState('rec'); setVSec(0)
-      mTimer.current = setInterval(() => setVSec(Math.floor((Date.now()-mStart.current)/1000)), 1000)
-    } catch { alert('Microphone access denied — please allow mic in browser settings') }
+  // Voice — browser Web Speech API (free, no OpenAI needed)
+  const startRec = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) { alert('Please use Chrome or Edge for voice recording.'); return }
+
+    const rec = new SR()
+    rec.continuous     = true
+    rec.interimResults = true
+    rec.lang           = 'id-ID' // Bahasa Indonesia + English mix
+
+    let final = ''
+    mStart.current = Date.now()
+
+    rec.onresult = (e: any) => {
+      let interim = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript + ' '
+        else interim += e.results[i][0].transcript
+      }
+      setVText(final + interim)
+    }
+
+    rec.onerror = () => { setVState('idle'); clearInterval(mTimer.current) }
+
+    rec.onend = async () => {
+      clearInterval(mTimer.current)
+      const dur = Math.floor((Date.now() - mStart.current) / 1000)
+      if (final.trim().length > 10) {
+        setVState('proc')
+        const form = new FormData()
+        form.append('transcript', final.trim())
+        form.append('duration', String(dur))
+        try {
+          const r = await fetch('/api/upload/voice', { method:'POST', body:form })
+          const d = await r.json()
+          setVText(d.transcript || final.trim())
+          setVTotal((p:number) => p + dur)
+          setVState('done'); fetchConf()
+        } catch { setVState('idle') }
+      } else { setVState('idle'); setVText('') }
+    }
+
+    rec.start()
+    ;(window as any)._rowangRec = rec
+    setVState('rec'); setVSec(0)
+    mTimer.current = setInterval(() => setVSec(Math.floor((Date.now()-mStart.current)/1000)), 1000)
   }
 
   const stopRec = () => {
-    mRec.current?.stop(); mRec.current?.stream.getTracks().forEach(t=>t.stop())
-    clearInterval(mTimer.current); setVState('proc')
-  }
-
-  const uploadRec = async () => {
-    const dur  = Math.floor((Date.now()-mStart.current)/1000)
-    const blob = new Blob(mChunk.current, { type:'audio/webm' })
-    const file = new File([blob], 'rec.webm', { type:'audio/webm' })
-    const form = new FormData(); form.append('audio', file); form.append('duration', String(dur))
-    try {
-      const r = await fetch('/api/upload/voice', { method:'POST', body:form })
-      const d = await r.json()
-      setVText(d.transcript||''); setVTotal(p=>p+dur); setVState('done'); fetchConf()
-    } catch { setVState('idle'); alert('Upload failed — check your connection') }
+    clearInterval(mTimer.current)
+    ;(window as any)._rowangRec?.stop()
   }
 
   const ft = (s:number) => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
@@ -549,30 +569,37 @@ function Dots() {
 }
 
 function VoiceBtn({ onTranscript }: { onTranscript:(t:string)=>void }) {
-  const [rec, setRec] = useState(false)
+  const [rec, setRec]   = useState(false)
   const [proc, setProc] = useState(false)
-  const mr = useRef<MediaRecorder|null>(null)
-  const ch = useRef<Blob[]>([])
-  const st = useRef(0)
 
-  const toggle = async () => {
+  const toggle = () => {
     if (rec) {
-      mr.current?.stop(); mr.current?.stream.getTracks().forEach(t=>t.stop()); setRec(false); setProc(true)
+      ;(window as any)._rowangInterviewRec?.stop()
+      setRec(false)
     } else {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio:true })
-      mr.current = new MediaRecorder(stream, { mimeType:'audio/webm' }); ch.current = []
-      mr.current.ondataavailable = e => { if(e.data.size>0) ch.current.push(e.data) }
-      mr.current.onstop = async () => {
-        const dur = Math.floor((Date.now()-st.current)/1000)
-        const blob = new Blob(ch.current,{type:'audio/webm'})
-        const file = new File([blob],'rec.webm',{type:'audio/webm'})
-        const form = new FormData(); form.append('audio',file); form.append('duration',String(dur))
-        const r = await fetch('/api/upload/voice',{method:'POST',body:form})
-        const d = await r.json()
-        if(d.transcript) onTranscript(d.transcript)
-        setProc(false)
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      if (!SR) { alert('Please use Chrome or Edge for voice.'); return }
+
+      const recognition = new SR()
+      recognition.continuous     = true
+      recognition.interimResults = false
+      recognition.lang           = 'id-ID'
+
+      let final = ''
+      recognition.onresult = (e: any) => {
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) final += e.results[i][0].transcript + ' '
+        }
       }
-      mr.current.start(250); st.current = Date.now(); setRec(true)
+      recognition.onend = () => {
+        setRec(false); setProc(false)
+        if (final.trim()) onTranscript(final.trim())
+      }
+      recognition.onerror = () => { setRec(false); setProc(false) }
+
+      recognition.start()
+      ;(window as any)._rowangInterviewRec = recognition
+      setRec(true)
     }
   }
 
