@@ -72,10 +72,13 @@ export default function Dashboard() {
 
   // Chat
   const [cMsgs, setCMsgs]     = useState<Msg[]>([])
-  const [cInput, setCInput]   = useState('')
-  const [cStream, setCStream] = useState(false)
-  const [lastQA, setLastQA]   = useState<{q:string;a:string}|null>(null)
-  const [calDone, setCalDone] = useState(false)
+  const [cInput, setCInput]       = useState('')
+  const [cStream, setCStream]     = useState(false)
+  const [lastQA, setLastQA]       = useState<{q:string;a:string}|null>(null)
+  const [calDone, setCalDone]     = useState(false)
+  const [calVerdict, setCalVerdict] = useState<'yes'|'no'|null>(null)
+  const [correction, setCorrection] = useState('')   // Julius writes what he WOULD say
+  const [corrSaved, setCorrSaved]   = useState(false)
   const cRef = useRef<HTMLDivElement>(null)
 
   useEffect(()=>{ if(status==='unauthenticated') router.push('/login') },[status])
@@ -147,7 +150,7 @@ export default function Dashboard() {
   const sendChat = async () => {
     const t=cInput.trim(); if(!t||cStream) return
     const msgs:Msg[]=[...cMsgs,{role:'user',content:t}]
-    setCMsgs([...msgs,{role:'assistant',content:''}]); setCInput(''); setCStream(true); setLastQA(null); setCalDone(false)
+    setCMsgs([...msgs,{role:'assistant',content:''}]); setCInput(''); setCStream(true); setLastQA(null); setCalDone(false); setCalVerdict(null); setCorrection(''); setCorrSaved(false)
     const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:msgs})})
     const reader=r.body!.getReader(); const dec=new TextDecoder(); let ai=''
     while(true){ const{done,value}=await reader.read(); if(done) break; ai+=dec.decode(value,{stream:true}); setCMsgs(p=>{const c=[...p];c[c.length-1]={role:'assistant',content:ai};return c}) }
@@ -156,7 +159,23 @@ export default function Dashboard() {
   const calibrate = async (verdict:'yes'|'no') => {
     if(!lastQA) return
     await fetch('/api/confidence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:lastQA.q,ai_response:lastQA.a,verdict})})
-    setCalDone(true); fetchConf()
+    setCalDone(true)
+    setCalVerdict(verdict)
+    fetchConf()
+  }
+
+  const saveCorrection = async () => {
+    if(!lastQA||!correction.trim()) return
+    // Save the correct response as a high-importance calibration memory
+    await fetch('/api/memories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      title:`Correction: "${lastQA.q.slice(0,60)}"`,
+      content:`Question asked: ${lastQA.q}\n\nAI said: ${lastQA.a}\n\nHow Julius would actually respond: ${correction}`,
+      category:'Calibration',
+      source:'correction',
+      importance:9,  // highest importance — direct correction from Julius
+    })})
+    setCorrSaved(true)
+    fetchConf()
   }
 
   if(status==='loading') return <div style={{minHeight:'100vh',background:C.cream,display:'flex',alignItems:'center',justifyContent:'center'}}><div style={{color:C.muted,fontFamily:'Inter'}}>Loading...</div></div>
@@ -478,12 +497,59 @@ export default function Dashboard() {
             {lastQA&&!cStream&&(
               <div style={card}>
                 <span style={mlbl}>Was that response accurate to you?</span>
-                {calDone?<div style={{fontSize:'14px',color:C.green,fontWeight:500}}>✓ Feedback saved — your clone is learning</div>
-                  :<div style={{display:'flex',gap:'10px'}}>
-                    <button onClick={()=>calibrate('yes')} style={{flex:1,padding:'11px',background:C.greenDim,border:`0.5px solid #C8E6C9`,borderRadius:'10px',color:C.green,fontFamily:'Inter',fontWeight:500,fontSize:'13px',cursor:'pointer'}}>✓ That's how I would respond</button>
-                    <button onClick={()=>calibrate('no')} style={{flex:1,padding:'11px',background:C.redDim,border:`0.5px solid #EBCFC9`,borderRadius:'10px',color:C.red,fontFamily:'Inter',fontWeight:500,fontSize:'13px',cursor:'pointer'}}>✗ I would NOT respond this way</button>
+
+                {/* Step 1 — Rate the response */}
+                {!calDone&&(
+                  <div style={{display:'flex',gap:'10px'}}>
+                    <button onClick={()=>calibrate('yes')} style={{flex:1,padding:'11px',background:C.greenDim,border:`0.5px solid #C8E6C9`,borderRadius:'10px',color:C.green,fontFamily:'Inter',fontWeight:500,fontSize:'13px',cursor:'pointer'}}>
+                      ✓ That's how I would respond
+                    </button>
+                    <button onClick={()=>calibrate('no')} style={{flex:1,padding:'11px',background:C.redDim,border:`0.5px solid #EBCFC9`,borderRadius:'10px',color:C.red,fontFamily:'Inter',fontWeight:500,fontSize:'13px',cursor:'pointer'}}>
+                      ✗ I would NOT respond this way
+                    </button>
                   </div>
-                }
+                )}
+
+                {/* Step 2a — Confirmed correct */}
+                {calDone&&calVerdict==='yes'&&(
+                  <div style={{fontSize:'14px',color:C.green,fontWeight:500}}>
+                    ✓ Great — this pattern is reinforced in your clone
+                  </div>
+                )}
+
+                {/* Step 2b — Marked wrong → ask for correction */}
+                {calDone&&calVerdict==='no'&&!corrSaved&&(
+                  <div>
+                    <div style={{fontSize:'13px',color:C.red,fontWeight:500,marginBottom:'10px'}}>
+                      ✗ Noted. How would you actually respond? Write it below — this becomes high-priority training data.
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={correction}
+                      onChange={e=>setCorrection(e.target.value)}
+                      placeholder={`How would Julius actually answer: "${lastQA.q.slice(0,80)}"?\n\nWrite it in your own voice — exactly as you would say it...`}
+                      style={{...ta,marginBottom:'10px',borderColor:C.border,fontSize:'13px'}}
+                    />
+                    <div style={{display:'flex',gap:'8px'}}>
+                      <button onClick={saveCorrection} disabled={!correction.trim()} style={{...btnP,flex:1,justifyContent:'center',padding:'10px',opacity:!correction.trim()?0.5:1,fontSize:'13px'}}>
+                        Save My Correct Response →
+                      </button>
+                      <button onClick={()=>setCorrSaved(true)} style={{...btnS,padding:'10px 14px',fontSize:'13px'}}>
+                        Skip
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 3 — Correction saved */}
+                {calDone&&calVerdict==='no'&&corrSaved&&(
+                  <div style={{fontSize:'14px',color:C.walnut,lineHeight:'1.65'}}>
+                    {correction.trim()
+                      ? <><span style={{fontWeight:500,color:C.espresso}}>✓ Your correction saved.</span> Your clone will learn from your real response and avoid this pattern in future.</>
+                      : <><span style={{fontWeight:500,color:C.espresso}}>✓ Feedback saved.</span> This pattern has been flagged as inaccurate.</>
+                    }
+                  </div>
+                )}
               </div>
             )}
           </div>
