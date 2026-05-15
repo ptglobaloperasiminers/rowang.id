@@ -6,10 +6,9 @@ import { db, getUserByEmail } from '@/lib/supabase'
 import { buildExtractionPrompt } from '@/lib/prompts'
 import { MODELS, MAX_TOKENS } from '@/lib/models'
 
-// ── Disable Next.js body size limit for file uploads ──────────────────────
-export const config = {
-  api: { bodyParser: false },
-}
+// ── Next.js 14 App Router route segment config ────────────────────────────
+export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const MAX_TEXT_CHARS = 10000
