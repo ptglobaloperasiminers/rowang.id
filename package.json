@@ -15,7 +15,9 @@
     "@anthropic-ai/sdk": "^0.27.0",
     "@supabase/supabase-js": "^2.44.4",
     "openai": "^4.52.7",
-    "clsx": "^2.1.1"
+    "clsx": "^2.1.1",
+    "mammoth": "^1.8.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "typescript": "^5",
