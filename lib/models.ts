@@ -1,17 +1,13 @@
 /**
- * ROWANG.ID — AI Model Routing (Mixed Strategy)
- *
- * Haiku  → background extraction, voice patterns, WhatsApp analysis
- * Sonnet → AI interview conductor (asks, follows up, goes deep)
- * Opus   → clone chat only (premium quality, where Julius is judged)
- *
- * Cost vs Opus-only: ~75% cheaper
+ * ROWANG.ID — AI Model Routing
+ * Haiku  → extraction (cheap, fast)
+ * Sonnet → interview conductor
+ * Sonnet → clone chat (Opus removed — invalid model string was causing 500 errors)
  */
-
 export const MODELS = {
-  EXTRACTION: 'claude-haiku-4-5-20251001',   // $0.80/$4 per 1M
-  INTERVIEW:  'claude-sonnet-4-6',            // $3/$15 per 1M
-  CLONE:      'claude-opus-4-5-20251101',     // $15/$75 per 1M
+  EXTRACTION: 'claude-haiku-4-5-20251001',
+  INTERVIEW:  'claude-sonnet-4-6',
+  CLONE:      'claude-sonnet-4-6',  // Using Sonnet — reliable, fast, good quality
 } as const
 
 export const MAX_TOKENS = {

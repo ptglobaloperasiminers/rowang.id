@@ -784,18 +784,11 @@ export default function Dashboard() {
               ))}
             </div>
             {walletTab==='add'&&(
-              <div style={card}>
-                <label style={mlbl}>Document type</label>
-                <select value={walletType} onChange={e=>setWalletType(e.target.value)} style={{...inp,marginBottom:'10px',cursor:'pointer'}}>
-                  {WALLET_TYPES.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
-                </select>
-                <label style={mlbl}>Title / description</label>
-                <input value={walletTitle} onChange={e=>setWalletTitle(e.target.value)} placeholder="e.g. KTP Julius Martono, valid until 2028" style={{...inp,marginBottom:'10px'}}/>
-                <label style={mlbl}>Notes — key information, location, instructions</label>
-                <textarea rows={5} value={walletNotes} onChange={e=>setWalletNotes(e.target.value)} placeholder="Location, contacts, instructions, key details..." style={{...ta,marginBottom:'10px'}}/>
-                <div style={{background:C.amberDim,borderRadius:'9px',padding:'9px 12px',marginBottom:'10px',fontSize:'11px',color:C.walnut,lineHeight:'1.6'}}>⚠️ Store references and key info here — not actual sensitive files. Upload sensitive documents to your private NAS instead.</div>
-                <button onClick={saveWalletItem} disabled={walletSaving||!walletTitle.trim()} style={{...btnP,width:'100%',justifyContent:'center',padding:'11px',opacity:(walletSaving||!walletTitle.trim())?0.5:1}}>{walletSaving?'Saving...':'Save to Private Wallet →'}</button>
-              </div>
+              <WalletAddForm
+                onSaved={async()=>{await loadWallet();await fetchConf();setWalletTab('list')}}
+                card={card} wCard={wCard} inp={inp} ta={ta} btnP={btnP} btnS={btnS} mlbl={mlbl}
+                C={C} WALLET_TYPES={WALLET_TYPES}
+              />
             )}
             {walletTab==='list'&&(
               walletItems.length===0?(
@@ -990,6 +983,122 @@ function BulkUpload({onComplete}:{onComplete:()=>void}){
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Wallet Add Form — file upload + multiple items of same type ────────────
+function WalletAddForm({onSaved,card,wCard,inp,ta,btnP,btnS,mlbl,C,WALLET_TYPES}:any) {
+  const [items,setItems]   = useState([{type:'id_card',title:'',notes:''}])
+  const [saving,setSaving] = useState(false)
+  const [files,setFiles]   = useState<{idx:number;file:File;status:'pending'|'analyzing'|'done'|'error';result?:string}[]>([])
+
+  const addItem = () => setItems(p=>[...p,{type:'id_card',title:'',notes:''}])
+  const removeItem = (i:number) => setItems(p=>p.filter((_,idx)=>idx!==i))
+  const updateItem = (i:number,field:string,val:string) => setItems(p=>p.map((it,idx)=>idx===i?{...it,[field]:val}:it))
+
+  const attachFile = async (idx:number, file:File) => {
+    const entry = {idx,file,status:'analyzing' as const}
+    setFiles(p=>[...p.filter(f=>!(f.idx===idx&&f.file.name===file.name)),entry])
+    // Analyze file through bulk API
+    const form = new FormData(); form.append('files',file)
+    try {
+      const res = await fetch('/api/upload/bulk',{method:'POST',body:form})
+      const data = await res.json()
+      const r = data.results?.[0]
+      setFiles(p=>p.map(f=>f.idx===idx&&f.file.name===file.name?{...f,status:r?.status==='processed'?'done':'error',result:r?.status==='processed'?`${r.memoriesCreated||0} insights extracted and saved`:r?.reason||'Failed'}:f))
+    } catch {
+      setFiles(p=>p.map(f=>f.idx===idx&&f.file.name===file.name?{...f,status:'error',result:'Upload failed'}:f))
+    }
+  }
+
+  const save = async () => {
+    const valid = items.filter(it=>it.title.trim())
+    if(!valid.length) return
+    setSaving(true)
+    for (const it of valid) {
+      const t = WALLET_TYPES.find((x:any)=>x.id===it.type)
+      const attachedFiles = files.filter(f=>f.idx===items.indexOf(it)&&f.status==='done')
+      const content = [
+        it.notes||`Document type: ${t?.label}. Title: ${it.title}.`,
+        attachedFiles.length ? `\nFiles analyzed: ${attachedFiles.map(f=>f.file.name).join(', ')}` : ''
+      ].filter(Boolean).join('\n')
+      await fetch('/api/memories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        title:`${t?.icon} ${it.title}`,
+        content, category:t?.label||'Document',
+        source:'wallet', importance:10,
+      })})
+    }
+    setSaving(false)
+    await onSaved()
+  }
+
+  const fileColor=(s:string)=>s==='done'?'#4A7C59':s==='error'?'#9B3A2A':s==='analyzing'?'#B47B2E':'#A08050'
+
+  return (
+    <div>
+      {items.map((it,i)=>{
+        const attachments = files.filter(f=>f.idx===i)
+        return (
+          <div key={i} style={{...card,borderLeft:`3px solid ${C.amber}`,marginBottom:'12px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
+              <span style={{fontFamily:'Lora,serif',fontSize:'14px',color:C.espresso}}>Document {i+1}</span>
+              {items.length>1&&<button onClick={()=>removeItem(i)} style={{background:'none',border:'none',color:C.light,fontSize:'13px',cursor:'pointer'}}>Remove</button>}
+            </div>
+
+            <label style={mlbl}>Document type</label>
+            <select value={it.type} onChange={e=>updateItem(i,'type',e.target.value)} style={{...inp,marginBottom:'10px',cursor:'pointer'}}>
+              {WALLET_TYPES.map((t:any)=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+            </select>
+
+            <label style={mlbl}>Title / description</label>
+            <input value={it.title} onChange={e=>updateItem(i,'title',e.target.value)} placeholder="e.g. KTP Julius Martono, valid until 2028" style={{...inp,marginBottom:'10px'}}/>
+
+            <label style={mlbl}>Notes — key info, location, instructions</label>
+            <textarea rows={3} value={it.notes} onChange={e=>updateItem(i,'notes',e.target.value)} placeholder="Location of physical document, key contacts, expiry date, important clauses, instructions..." style={{...ta,marginBottom:'10px'}}/>
+
+            {/* File + photo upload for wallet */}
+            <label style={mlbl}>Attach files / photos (optional — AI reads and extracts data)</label>
+            <div style={{display:'flex',gap:'6px',marginBottom:'8px',flexWrap:'wrap'}}>
+              <label style={{fontSize:'11px',color:C.walnut,cursor:'pointer',padding:'6px 12px',background:C.sand,border:`0.5px solid ${C.border}`,borderRadius:'8px',fontFamily:'Inter'}}>
+                📎 Attach File
+                <input type="file" accept=".pdf,.docx,.doc,.txt,.csv" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])attachFile(i,e.target.files[0])}}/>
+              </label>
+              <label style={{fontSize:'11px',color:C.walnut,cursor:'pointer',padding:'6px 12px',background:C.sand,border:`0.5px solid ${C.border}`,borderRadius:'8px',fontFamily:'Inter'}}>
+                🖼️ Attach Photo / Scan
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])attachFile(i,e.target.files[0])}}/>
+              </label>
+              <label style={{fontSize:'11px',color:C.walnut,cursor:'pointer',padding:'6px 12px',background:C.sand,border:`0.5px solid ${C.border}`,borderRadius:'8px',fontFamily:'Inter'}}>
+                🎤 Voice Note
+                <input type="file" accept="audio/mp3,audio/m4a,audio/wav,audio/webm" style={{display:'none'}} onChange={e=>{if(e.target.files?.[0])attachFile(i,e.target.files[0])}}/>
+              </label>
+            </div>
+            {attachments.length>0&&(
+              <div style={{display:'flex',flexDirection:'column',gap:'4px',marginBottom:'8px'}}>
+                {attachments.map((f,fi)=>(
+                  <div key={fi} style={{display:'flex',alignItems:'center',gap:'8px',padding:'5px 9px',background:C.sand,borderRadius:'7px',fontSize:'11px'}}>
+                    <span>{f.file.type.startsWith('image/')?'🖼️':'📄'}</span>
+                    <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:C.espresso}}>{f.file.name}</span>
+                    <span style={{color:fileColor(f.status),flexShrink:0}}>{f.status==='analyzing'?'⟳ Analyzing...':f.status==='done'?`✓ ${f.result}`:f.status==='error'?`✗ ${f.result}`:'Pending'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      <button onClick={addItem} style={{...btnS,width:'100%',justifyContent:'center',padding:'9px',fontSize:'12px',marginBottom:'12px'}}>
+        + Add Another Document of Same or Different Type
+      </button>
+
+      <div style={{background:C.amberDim,borderRadius:'9px',padding:'9px 12px',marginBottom:'12px',fontSize:'11px',color:C.walnut,lineHeight:'1.6'}}>
+        📎 <span style={{fontWeight:500}}>You can upload the actual file.</span> AI reads it, extracts important facts, saves them to your identity database, then deletes the raw file. Your data stays private.
+      </div>
+
+      <button onClick={save} disabled={saving||!items.some(it=>it.title.trim())} style={{...btnP,width:'100%',justifyContent:'center',padding:'11px',opacity:(saving||!items.some(it=>it.title.trim()))?0.5:1}}>
+        {saving?'Saving...':'Save to Private Wallet →'}
+      </button>
     </div>
   )
 }

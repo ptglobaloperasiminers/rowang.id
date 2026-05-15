@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
   const voicePatterns = (voiceRes.data || [])
     .map(r => r.transcript?.slice(0, 120)).filter(Boolean) as string[]
 
+  // ── OPUS: premium clone output ─────────────────────────────────────────
   const system = buildFullPersonaPrompt(
     ownerRes.data?.name || 'this person',
     personaMap,
@@ -38,10 +39,10 @@ export async function POST(req: NextRequest) {
   )
 
   const stream = await claude.messages.stream({
-    model: MODELS.CLONE,
+    model:      MODELS.CLONE,
     max_tokens: MAX_TOKENS.CLONE,
     system,
-    messages: messages.slice(-20),
+    messages:   messages.slice(-20),
   })
 
   let full = ''
@@ -56,8 +57,8 @@ export async function POST(req: NextRequest) {
       }
       db.from('chat_sessions').insert({
         owner_user_id: ownerId,
-        visitor_name: user.name || user.email,
-        messages: [...messages, { role: 'assistant', content: full }],
+        visitor_name:  user.name || user.email,
+        messages:      [...messages, { role: 'assistant', content: full }],
       }).then(() => {})
       ctrl.close()
     },
