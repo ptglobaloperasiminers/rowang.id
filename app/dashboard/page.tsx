@@ -659,7 +659,7 @@ function BulkUpload({ onComplete }: { onComplete: () => void }) {
           )}
 
           {queued>0&&(
-            <button onClick={process} disabled={busy} style={{...btnP,width:'100%',justifyContent:'center',padding:'13px',opacity:busy?0.6:1}}>
+            <button onClick={process} disabled={busy} style={{padding:'13px',background:busy?'#EFE0C0':'#B47B2E',color:busy?'#A08050':'#FFF8EC',border:'none',borderRadius:'10px',fontFamily:'Inter',fontWeight:500,fontSize:'14px',cursor:busy?'not-allowed':'pointer',width:'100%',opacity:1}}>
               {busy?`Analyzing ${files.filter(f=>f.status==='uploading').length} files...`:`⚡ Analyze ${queued} file${queued>1?'s':''} — extract identity data`}
             </button>
           )}
