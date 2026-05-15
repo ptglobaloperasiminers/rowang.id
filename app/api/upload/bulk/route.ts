@@ -173,7 +173,7 @@ async function extractFromPDF(base64: string, filename: string) {
         content: [{
           type: 'document',
           source: { type: 'base64', media_type: 'application/pdf', data: base64 },
-        }, {
+        } as any, {
           type: 'text',
           text: 'Extract personality insights from this document.',
         }],
